@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="2">
+
+  <name>ads122u_driver</name>
+  <version>1.0.0</version>
+  <description>ADC ads122u driver</description>
+
+  <maintainer email="hertdani@fel.cvut.cz">Daniel Hert</maintainer>
+  <author email="hertdani@fel.cvut.cz">Daniel Hert</author>
+
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>cmake_modules</depend>
+  <depend>roscpp</depend>
+  <depend>nodelet</depend>
+
+  <export>
+    <nodelet plugin="${prefix}/nodelets.xml" />
+  </export>
+
+</package>

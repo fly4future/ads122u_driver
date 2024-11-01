@@ -1,0 +1,5 @@
+<library path="lib/libAds122uDriver">
+  <class name="ads122u_driver/Ads122uDriver" type="ads122u_driver::Ads122uDriver" base_class_type="nodelet::Nodelet">
+    <description>Ads122uDriver nodelet</description>
+  </class>
+</library>
