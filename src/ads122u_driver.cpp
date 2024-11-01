@@ -14,6 +14,8 @@
 #include <serial_port.h>
 
 
+/* defines //{ */
+
 #define ADS122U04_CONVERSION_TIMEOUT 75
 
 // Define 2/3/4-Wire, Temperature and Raw modes
@@ -164,6 +166,120 @@
 #define ADS122U04_IDAC2_REFP 0x5
 #define ADS122U04_IDAC2_REFN 0x6
 
+typedef struct
+{
+  uint8_t inputMux;
+  uint8_t gainLevel;
+  uint8_t pgaBypass;
+  uint8_t dataRate;
+  uint8_t opMode;
+  uint8_t convMode;
+  uint8_t selectVref;
+  uint8_t tempSensorEn;
+  uint8_t dataReadyEn;
+  uint8_t dataCounterEn;
+  uint8_t dataCRCen;
+  uint8_t burnOutEn;
+  uint8_t idacCurrent;
+  uint8_t routeIDAC1;
+  uint8_t routeIDAC2;
+  uint8_t outputMODE;
+  uint8_t gpio2DIR;
+  uint8_t gpio1DIR;
+  uint8_t gpio0DIR;
+  uint8_t gpio2SEL;
+  uint8_t gpio2DAT;
+  uint8_t gpio1DAT;
+  uint8_t gpio0DAT;
+} ADS122U04_initParam;
+
+struct CONFIG_REG_0
+{
+  uint8_t PGA_BYPASS : 1;  // 0
+  uint8_t GAIN : 3;        // 1-3
+  uint8_t MUX : 4;         // 4-7
+};
+union CONFIG_REG_0_U
+{
+  uint8_t             all;
+  struct CONFIG_REG_0 bit;
+};
+
+//--------------Address 0x01---------------------------------
+struct CONFIG_REG_1
+{
+  uint8_t TS : 1;     // 0
+  uint8_t VREF : 2;   // 1-2
+  uint8_t CMBIT : 1;  // 3
+  uint8_t MODE : 1;   // 4
+  uint8_t DR : 3;     // 5-7
+};
+union CONFIG_REG_1_U
+{
+  uint8_t             all;
+  struct CONFIG_REG_1 bit;
+};
+
+//--------------Address 0x02---------------------------------
+struct CONFIG_REG_2
+{
+  uint8_t IDAC : 3;     // 0-2
+  uint8_t BCS : 1;      // 3
+  uint8_t CRCbits : 2;  // 4-5
+  uint8_t DCNT : 1;     // 6
+  uint8_t DRDY : 1;     // 7
+};
+union CONFIG_REG_2_U
+{
+  uint8_t             all;
+  struct CONFIG_REG_2 bit;
+};
+
+//--------------Address 0x03---------------------------------
+struct CONFIG_REG_3
+{
+  uint8_t RESERVED : 1;  // 0-1
+  uint8_t AUTO : 1;      // 0-1
+  uint8_t I2MUX : 3;     // 2-4
+  uint8_t I1MUX : 3;     // 5-7
+};
+union CONFIG_REG_3_U
+{
+  uint8_t             all;
+  struct CONFIG_REG_3 bit;
+};
+
+
+//--------------Address 0x04---------------------------------
+struct CONFIG_REG_4
+{
+  uint8_t GPIO0DAT : 1;  // 0-1
+  uint8_t GPIO1DAT : 1;  // 0-1
+  uint8_t GPIO2DAT : 1;  // 0-1
+  uint8_t GPIO2SEL : 1;  // 0-1
+  uint8_t GPIO0DIR : 1;  // 0-1
+  uint8_t GPIO1DIR : 1;  // 0-1
+  uint8_t GPIO2DIR : 1;  // 0-1
+  uint8_t RESERVED : 1;  // 2-4
+};
+union CONFIG_REG_4_U
+{
+  uint8_t             all;
+  struct CONFIG_REG_4 bit;
+};
+
+// All four registers
+typedef struct ADS122U04Reg
+{
+  union CONFIG_REG_0_U reg0;
+  union CONFIG_REG_1_U reg1;
+  union CONFIG_REG_2_U reg2;
+  union CONFIG_REG_3_U reg3;
+  union CONFIG_REG_4_U reg4;
+} ADS122U04Reg_t;
+
+//}
+
 namespace ads122u_driver
 {
 
@@ -189,11 +305,15 @@ private:
 
   ros::Time last_received_ = ros::Time::now();
   uint8_t   connectToSensor();
+  bool      reset();
+  bool      send_command(int8_t command);
+  bool      configureADCmode(uint8_t wire_mode, uint8_t rate);
+  bool      ADS122U04_init(ADS122U04_initParam* param);
+  bool      ADS122U04_writeReg(uint8_t reg, uint8_t writeValue);
+  bool      ADS122U04_sendCommandWithValue(uint8_t command, uint8_t value);
 
-  // | ---------------------- ROS publishers --------------------- |
-  /* ros::Publisher pub_reference_; */
-
-  // | ---------------------- ROS timers --------------------- |
+  uint8_t        _wireMode = ADS122U04_RAW_MODE;
+  ADS122U04Reg_t ADS122U04_Reg;
 
   ros::Timer main_timer_;
   void       callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te);
@@ -225,15 +345,17 @@ void Ads122uDriver::onInit() {
   srv_server_start_ = nh.advertiseService("start", &Ads122uDriver::callbackStart, this);
 
   connectToSensor();
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  reset();
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
+  configureADCmode(ADS122U04_RAW_MODE, 20);
 
   is_initialized_ = true;
   ROS_INFO("[Ads122uDriver]: Initialized");
 }
 
 //}
-
-// | --------------------- timer callbacks -------------------- |
 
 /* callbackMainTimer() //{ */
 
@@ -244,7 +366,7 @@ void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te
   serial_port_.sendChar(ADS122U04_SYNC_HEAD);
   serial_port_.sendChar(ADS122U04_RDATA_CMD);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  std::this_thread::sleep_for(std::chrono::milliseconds(25));
 
   uint8_t read_buffer[256];
   int     bytes_read;
@@ -256,8 +378,6 @@ void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te
 
 //}
 
-// | -------------------- service callbacks ------------------- |
-
 /* callbackStart() //{ */
 
 bool Ads122uDriver::callbackStart([[maybe_unused]] std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res) {
@@ -265,6 +385,124 @@ bool Ads122uDriver::callbackStart([[maybe_unused]] std_srvs::Trigger::Request& r
   res.success = true;
   res.message = "Starting waypoint following.";
 
+  return true;
+}
+
+//}
+
+/*  configureADCmode() //{ */
+
+bool Ads122uDriver::configureADCmode(uint8_t wire_mode, uint8_t rate) {
+  ADS122U04_initParam initParams;  // Storage for the chip parameters
+
+  if (wire_mode == ADS122U04_RAW_MODE)  // Raw mode : disable the IDAC and use the internal reference
+  {
+    initParams.inputMux      = ADS122U04_MUX_AIN0_AIN1;  // Route AIN1 to AINP and AIN0 to AINN
+    initParams.gainLevel     = ADS122U04_GAIN_128;       // Set the gain to 1
+    initParams.pgaBypass     = ADS122U04_PGA_ENABLED;
+    initParams.dataRate      = rate;                                  // Set the data rate (samples per second). Defaults to 20
+    initParams.opMode        = ADS122U04_OP_MODE_TURBO;               // Disable turbo mode
+    initParams.convMode      = ADS122U04_CONVERSION_MODE_CONTINUOUS;  // Use single shot mode
+    initParams.selectVref    = ADS122U04_VREF_AVDD1;                  // Use the internal 2.048V reference todo
+    initParams.tempSensorEn  = ADS122U04_TEMP_SENSOR_OFF;             // Disable the temperature sensor
+    initParams.dataReadyEn   = 0b0;
+    initParams.dataCounterEn = ADS122U04_DCNT_DISABLE;          // Disable the data counter
+    initParams.dataCRCen     = ADS122U04_CRC_DISABLED;          // Disable CRC checking
+    initParams.burnOutEn     = ADS122U04_BURN_OUT_CURRENT_OFF;  // Disable the burn-out current
+    initParams.idacCurrent   = ADS122U04_IDAC_CURRENT_OFF;      // Disable the IDAC current
+    initParams.routeIDAC1    = ADS122U04_IDAC1_DISABLED;        // Disable IDAC1
+    initParams.routeIDAC2    = ADS122U04_IDAC2_DISABLED;        // Disable IDAC2
+    initParams.outputMODE    = 0b0;
+    initParams.gpio2DIR      = 0b1;
+    initParams.gpio1DIR      = 0b0;
+    initParams.gpio0DIR      = 0b0;
+    initParams.gpio2SEL      = 0b1;
+    initParams.gpio2DAT      = 0b0;
+    initParams.gpio1DAT      = 0b0;
+    initParams.gpio0DAT      = 0b0;
+    _wireMode                = ADS122U04_RAW_MODE;  // Update the wire mode
+  } else {
+    ROS_ERROR("[Ads122uDriver]: configureADCmode: unknown mode");
+    return (false);
+  }
+  return (ADS122U04_init(&initParams));  // Configure the chip
+}
+
+//}
+
+/* ADS122U04_init //{ */
+
+bool Ads122uDriver::ADS122U04_init(ADS122U04_initParam* param) {
+
+  ADS122U04_Reg.reg0.all = 0;  // Reset all five register values to the default value of 0x00
+  ADS122U04_Reg.reg1.all = 0;
+  ADS122U04_Reg.reg2.all = 0;
+  ADS122U04_Reg.reg3.all = 0;
+  ADS122U04_Reg.reg4.all = 0;
+
+  ADS122U04_Reg.reg0.bit.MUX        = param->inputMux;
+  ADS122U04_Reg.reg0.bit.GAIN       = param->gainLevel;
+  ADS122U04_Reg.reg0.bit.PGA_BYPASS = param->pgaBypass;
+
+  ADS122U04_Reg.reg1.bit.DR    = param->dataRate;
+  ADS122U04_Reg.reg1.bit.MODE  = param->opMode;
+  ADS122U04_Reg.reg1.bit.CMBIT = param->convMode;
+  ADS122U04_Reg.reg1.bit.VREF  = param->selectVref;
+  ADS122U04_Reg.reg1.bit.TS    = param->tempSensorEn;
+
+  ADS122U04_Reg.reg2.bit.DRDY    = param->dataReadyEn;
+  ADS122U04_Reg.reg2.bit.DCNT    = param->dataCounterEn;
+  ADS122U04_Reg.reg2.bit.CRCbits = param->dataCRCen;
+  ADS122U04_Reg.reg2.bit.BCS     = param->burnOutEn;
+  ADS122U04_Reg.reg2.bit.IDAC    = param->idacCurrent;
+
+  ADS122U04_Reg.reg3.bit.I1MUX = param->routeIDAC1;
+  ADS122U04_Reg.reg3.bit.I2MUX = param->routeIDAC2;
+  ADS122U04_Reg.reg3.bit.AUTO  = param->outputMODE;
+
+  ADS122U04_Reg.reg4.bit.GPIO2DIR = param->gpio2DIR;
+  ADS122U04_Reg.reg4.bit.GPIO1DIR = param->gpio1DIR;
+  ADS122U04_Reg.reg4.bit.GPIO0DIR = param->gpio0DIR;
+  ADS122U04_Reg.reg4.bit.GPIO2SEL = param->gpio2SEL;
+  ADS122U04_Reg.reg4.bit.GPIO2DAT = param->gpio2DAT;
+  ADS122U04_Reg.reg4.bit.GPIO1DAT = param->gpio1DAT;
+  ADS122U04_Reg.reg4.bit.GPIO0DAT = param->gpio0DAT;
+
+  bool ret_val = true;  // Flag to show if the four writeRegs were successful
+  // (If any one writeReg returns false, ret_val will be false)
+
+
+  ret_val &= ADS122U04_writeReg(ADS122U04_CONFIG_0_REG, ADS122U04_Reg.reg0.all);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  ret_val &= ADS122U04_writeReg(ADS122U04_CONFIG_1_REG, ADS122U04_Reg.reg1.all);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  ret_val &= ADS122U04_writeReg(ADS122U04_CONFIG_2_REG, ADS122U04_Reg.reg2.all);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  ret_val &= ADS122U04_writeReg(ADS122U04_CONFIG_3_REG, ADS122U04_Reg.reg3.all);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  ret_val &= ADS122U04_writeReg(ADS122U04_CONFIG_4_REG, ADS122U04_Reg.reg4.all);
+
+  return (ret_val);
+}
+
+//}
+
+/*  ADS122U04_writeReg() //{ */
+
+bool Ads122uDriver::ADS122U04_writeReg(uint8_t reg, uint8_t writeValue) {
+  uint8_t command = 0;
+  command         = ADS122U04_WRITE_CMD(reg);
+  return (ADS122U04_sendCommandWithValue(command, writeValue));
+}
+
+//}
+
+/*  ADS122U04_sendCommandWithValue() //{ */
+
+bool Ads122uDriver::ADS122U04_sendCommandWithValue(uint8_t command, uint8_t value) {
+  serial_port_.sendChar(ADS122U04_SYNC_HEAD);
+  serial_port_.sendChar(command);
+  serial_port_.sendChar(value);
   return true;
 }
 
@@ -287,6 +525,24 @@ uint8_t Ads122uDriver::connectToSensor(void) {
   last_received_ = ros::Time::now();
 
   return 1;
+}
+
+//}
+
+/* reset() //{ */
+
+bool Ads122uDriver::reset(void) {
+  return (send_command(ADS122U04_RESET_CMD));
+}
+
+//}
+
+/*  send_command() //{ */
+
+bool Ads122uDriver::send_command(int8_t command) {
+  serial_port_.sendChar(ADS122U04_SYNC_HEAD);
+  serial_port_.sendChar(command);
+  return true;
 }
 
 //}
