@@ -294,7 +294,7 @@ public:
 private:
   // | -------------------------- flags ------------------------- |
 
-  std::string             portname_ = "/dev/ttyUSB0";
+  std::string             portname_ = "test";
   int                     baudrate_ = 115200;
   serial_port::SerialPort serial_port_;
 
@@ -334,6 +334,9 @@ void Ads122uDriver::onInit() {
 
   /* waits for the ROS to publish clock */
   ros::Time::waitForValid();
+
+  nh.param("portname", portname_, std::string("/dev/ttyUSB0"));
+  nh.param("baudrate", baudrate_, 115200);
 
   // | -------- initialize a publisher for UAV reference -------- |
   /* pub_reference_ = nh.advertise<mrs_msgs::ReferenceStamped>("reference_out", 1); */
