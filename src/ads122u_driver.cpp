@@ -377,6 +377,17 @@ void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te
   bytes_read = serial_port_.readSerial(read_buffer, serial_buffer_size_);
 
   ROS_INFO_STREAM("[Ads122uDriver]: read " << bytes_read << " bytes");
+
+  if(bytes_read == 3){
+  
+  }
+
+  uint8_t RXByte[3] = {0};
+  RXByte[0] = read_buffer[0]; // MSB
+  RXByte[1] = read_buffer[1];
+  RXByte[2] = read_buffer[2]; // LSB
+
+  uint32_t conversionData =  (RXByte[0] + RXByte[1] * 256 + RXByte[2] * 65536);
 }
 
 //}
