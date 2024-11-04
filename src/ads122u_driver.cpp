@@ -388,6 +388,11 @@ void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te
   RXByte[2] = read_buffer[2]; // LSB
 
   uint32_t conversionData =  (RXByte[0] + RXByte[1] * 256 + RXByte[2] * 65536);
+  ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[0]));
+  ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[1]));
+  ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[2]));
+  ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[255]));
+  ROS_INFO_STREAM("DATA: " << std::to_string(conversionData));
 }
 
 //}
