@@ -307,8 +307,8 @@ private:
   uint8_t   connectToSensor();
   bool      reset();
   bool      send_command(int8_t command);
-  bool      start();
   bool      configureADCmode(uint8_t wire_mode, uint8_t rate);
+  bool      start();
   bool      ADS122U04_init(ADS122U04_initParam* param);
   bool      ADS122U04_writeReg(uint8_t reg, uint8_t writeValue);
   bool      ADS122U04_sendCommandWithValue(uint8_t command, uint8_t value);
@@ -343,7 +343,7 @@ void Ads122uDriver::onInit() {
   /* pub_reference_ = nh.advertise<mrs_msgs::ReferenceStamped>("reference_out", 1); */
 
   // | -- initialize the main timer - main loop of the nodelet -- |
-  main_timer_ = nh.createTimer(ros::Rate(10), &Ads122uDriver::callbackMainTimer, this);
+  main_timer_ = nh.createTimer(ros::Rate(20), &Ads122uDriver::callbackMainTimer, this);
 
   // | ---------------- initialize service server --------------- |
   srv_server_start_ = nh.advertiseService("start", &Ads122uDriver::callbackStart, this);
@@ -368,18 +368,21 @@ void Ads122uDriver::onInit() {
 void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te) {
   //ROS_INFO("[Ads122uDriver]: Main timer spinning");
 
+  configureADCmode(ADS122U04_RAW_MODE, 20);
+  start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
   serial_port_.sendChar(ADS122U04_SYNC_HEAD);
   serial_port_.sendChar(ADS122U04_RDATA_CMD);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
   uint8_t read_buffer[256];
   int     bytes_read;
 
   bytes_read = serial_port_.readSerial(read_buffer, serial_buffer_size_);
 
-  //ROS_INFO_STREAM("[Ads122uDriver]: read " << bytes_read << " bytes");
+  ROS_INFO_STREAM("[Ads122uDriver]: read " << bytes_read << " bytes");
 
   if(bytes_read == 3){
   
@@ -392,6 +395,7 @@ void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te
 
   uint32_t conversionData =  (RXByte[0] + RXByte[1] * 256 + RXByte[2] * 65536);
 
+  ROS_INFO_STREAM("Value: " << (std::to_string((double(conversionData)/(16777215.0))*10)) << " raw: " << std::to_string(conversionData) << " " << std::to_string(read_buffer[0]) << " " << std::to_string(read_buffer[1]) << " " << std::to_string(read_buffer[2])) ;
   if ((conversionData & 0x00800000) == 0x00800000)
     conversionData |= 0xFF000000;
   //ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[0]));
@@ -399,7 +403,7 @@ void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te
   //ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[2]));
   //ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[255]));
   //ROS_INFO_STREAM("DATA: " << std::to_string(conversionData));
-  ROS_INFO_STREAM("Value: " << (std::to_string((double(conversionData)/(16777215.0))*5)) << "   raw: " << std::to_string(conversionData));
+  ROS_INFO_STREAM("Value: " << (std::to_string((double(conversionData)/(16777215.0))*10)) << " raw: " << std::to_string(conversionData) << " " << std::to_string(read_buffer[0]) << " " << std::to_string(read_buffer[1]) << " " << std::to_string(read_buffer[2])) ;
 }
 
 //}
@@ -424,10 +428,10 @@ bool Ads122uDriver::configureADCmode(uint8_t wire_mode, uint8_t rate) {
   if (wire_mode == ADS122U04_RAW_MODE)  // Raw mode : disable the IDAC and use the internal reference
   {
     initParams.inputMux      = ADS122U04_MUX_AIN0_AVSS;  
-    initParams.gainLevel     = ADS122U04_GAIN_128;       // Set the gain to 1
-    initParams.pgaBypass     = ADS122U04_PGA_ENABLED;
+    initParams.gainLevel     = ADS122U04_GAIN_1;
+    initParams.pgaBypass     = ADS122U04_PGA_DISABLED;
     initParams.dataRate      = rate;                                  // Set the data rate (samples per second). Defaults to 20
-    initParams.opMode        = ADS122U04_OP_MODE_TURBO;               // Disable turbo mode
+    initParams.opMode        = ADS122U04_OP_MODE_NORMAL;               // Disable turbo mode
     initParams.convMode      = ADS122U04_CONVERSION_MODE_CONTINUOUS;  // Use single shot mode
     initParams.selectVref    = ADS122U04_VREF_EXT_REF_PINS;
     initParams.tempSensorEn  = ADS122U04_TEMP_SENSOR_OFF;             // Disable the temperature sensor
