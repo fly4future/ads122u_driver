@@ -8,6 +8,7 @@ set(CATKIN_DEPENDENCIES
   cmake_modules
   roscpp
   nodelet
+  std_msgs
   )
 
 set(LIBRARIES

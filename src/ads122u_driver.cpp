@@ -1,3 +1,5 @@
+/* Derived from https://github.com/yasir-shahzad/ADS122U04_ADC_Arduino_Library/tree/master */
+
 /* includes //{ */
 #include <chrono>
 #include <thread>
@@ -9,6 +11,8 @@
 
 /* for calling simple ros services */
 #include <std_srvs/Trigger.h>
+#include <std_msgs/UInt32.h>
+#include <std_msgs/Float64.h>
 //}
 
 #include <serial_port.h>
@@ -301,7 +305,7 @@ private:
   bool              is_connected_   = false;
   std::atomic<bool> is_initialized_ = false;
 
-  int serial_buffer_size_ = 1024;
+  int serial_buffer_size_ = 256;
 
   ros::Time last_received_ = ros::Time::now();
   uint8_t   connectToSensor();
@@ -312,6 +316,7 @@ private:
   bool      ADS122U04_init(ADS122U04_initParam* param);
   bool      ADS122U04_writeReg(uint8_t reg, uint8_t writeValue);
   bool      ADS122U04_sendCommandWithValue(uint8_t command, uint8_t value);
+  bool      getConversionData(uint32_t* conversionData);
 
   uint8_t        _wireMode = ADS122U04_RAW_MODE;
   ADS122U04Reg_t ADS122U04_Reg;
@@ -323,6 +328,10 @@ private:
 
   bool               callbackStart([[maybe_unused]] std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res);
   ros::ServiceServer srv_server_start_;
+
+  // | ---------------------- ROS publishers --------------------- |
+  ros::Publisher pub_raw_;
+  ros::Publisher pub_voltage_;
 };
 //}
 
@@ -340,7 +349,8 @@ void Ads122uDriver::onInit() {
   nh.param("baudrate", baudrate_, 115200);
 
   // | -------- initialize a publisher for UAV reference -------- |
-  /* pub_reference_ = nh.advertise<mrs_msgs::ReferenceStamped>("reference_out", 1); */
+  pub_raw_ = nh.advertise<std_msgs::UInt32>("raw_out", 1);
+  pub_voltage_ = nh.advertise<std_msgs::Float64>("voltage_out", 1);
 
   // | -- initialize the main timer - main loop of the nodelet -- |
   main_timer_ = nh.createTimer(ros::Rate(20), &Ads122uDriver::callbackMainTimer, this);
@@ -355,7 +365,9 @@ void Ads122uDriver::onInit() {
 
   configureADCmode(ADS122U04_RAW_MODE, 20);
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
   start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
   is_initialized_ = true;
   ROS_INFO("[Ads122uDriver]: Initialized");
@@ -366,44 +378,27 @@ void Ads122uDriver::onInit() {
 /* callbackMainTimer() //{ */
 
 void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te) {
-  //ROS_INFO("[Ads122uDriver]: Main timer spinning");
 
-  configureADCmode(ADS122U04_RAW_MODE, 20);
-  start();
-  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  uint32_t raw_data;
 
-  serial_port_.sendChar(ADS122U04_SYNC_HEAD);
-  serial_port_.sendChar(ADS122U04_RDATA_CMD);
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-  uint8_t read_buffer[256];
-  int     bytes_read;
-
-  bytes_read = serial_port_.readSerial(read_buffer, serial_buffer_size_);
-
-  ROS_INFO_STREAM("[Ads122uDriver]: read " << bytes_read << " bytes");
-
-  if(bytes_read == 3){
-  
+  if (!getConversionData(&raw_data)) {
+    ROS_ERROR("[Ads122uDriver]: Could not read raw data");
+    return;
   }
 
-  uint8_t RXByte[3] = {0};
-  RXByte[0] = read_buffer[0]; // MSB
-  RXByte[1] = read_buffer[1];
-  RXByte[2] = read_buffer[2]; // LSB
+  int32_t raw_data_signed = int32_t(raw_data);
+  double  voltage         = (double(raw_data_signed) / (16777215.0)) * 10;
+  
+  std_msgs::UInt32 raw_msg;
+  std_msgs::Float64 voltage_msg;
 
-  uint32_t conversionData =  (RXByte[0] + RXByte[1] * 256 + RXByte[2] * 65536);
+  raw_msg.data = raw_data;
+  voltage_msg.data = voltage;
 
-  ROS_INFO_STREAM("Value: " << (std::to_string((double(conversionData)/(16777215.0))*10)) << " raw: " << std::to_string(conversionData) << " " << std::to_string(read_buffer[0]) << " " << std::to_string(read_buffer[1]) << " " << std::to_string(read_buffer[2])) ;
-  if ((conversionData & 0x00800000) == 0x00800000)
-    conversionData |= 0xFF000000;
-  //ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[0]));
-  //ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[1]));
-  //ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[2]));
-  //ROS_INFO_STREAM("DATA: " << std::to_string(read_buffer[255]));
-  //ROS_INFO_STREAM("DATA: " << std::to_string(conversionData));
-  ROS_INFO_STREAM("Value: " << (std::to_string((double(conversionData)/(16777215.0))*10)) << " raw: " << std::to_string(conversionData) << " " << std::to_string(read_buffer[0]) << " " << std::to_string(read_buffer[1]) << " " << std::to_string(read_buffer[2])) ;
+  pub_raw_.publish(raw_msg);
+  pub_voltage_.publish(voltage_msg);
+
+  ROS_INFO_STREAM("Volts: " << std::to_string(voltage) << " raw: " << std::to_string(raw_data) << " raw signed: " << std::to_string(raw_data_signed));
 }
 
 //}
@@ -427,14 +422,14 @@ bool Ads122uDriver::configureADCmode(uint8_t wire_mode, uint8_t rate) {
 
   if (wire_mode == ADS122U04_RAW_MODE)  // Raw mode : disable the IDAC and use the internal reference
   {
-    initParams.inputMux      = ADS122U04_MUX_AIN0_AVSS;  
+    initParams.inputMux      = ADS122U04_MUX_AIN0_AVSS;
     initParams.gainLevel     = ADS122U04_GAIN_1;
     initParams.pgaBypass     = ADS122U04_PGA_DISABLED;
-    initParams.dataRate      = rate;                                  // Set the data rate (samples per second). Defaults to 20
+    initParams.dataRate      = rate;                                   // Set the data rate (samples per second). Defaults to 20
     initParams.opMode        = ADS122U04_OP_MODE_NORMAL;               // Disable turbo mode
-    initParams.convMode      = ADS122U04_CONVERSION_MODE_CONTINUOUS;  // Use single shot mode
+    initParams.convMode      = ADS122U04_CONVERSION_MODE_SINGLE_SHOT;  // Use single shot mode
     initParams.selectVref    = ADS122U04_VREF_EXT_REF_PINS;
-    initParams.tempSensorEn  = ADS122U04_TEMP_SENSOR_OFF;             // Disable the temperature sensor
+    initParams.tempSensorEn  = ADS122U04_TEMP_SENSOR_OFF;  // Disable the temperature sensor
     initParams.dataReadyEn   = 0b0;
     initParams.dataCounterEn = ADS122U04_DCNT_DISABLE;          // Disable the data counter
     initParams.dataCRCen     = ADS122U04_CRC_DISABLED;          // Disable CRC checking
@@ -573,6 +568,8 @@ bool Ads122uDriver::start() {
   return send_command(ADS122U04_START_CMD);
 }
 
+//}
+
 /*  send_command() //{ */
 
 bool Ads122uDriver::send_command(int8_t command) {
@@ -583,57 +580,35 @@ bool Ads122uDriver::send_command(int8_t command) {
 
 //}
 
-/*  ADS122U04_getConversionData()//{ */
+/*  getConversionData() //{ */
 
-/* void Ads122uDriver::ADS122U04_getConversionData() */
-/* { */
-/*   uint8_t RXByte[3] = {0}; */
-
-/*   _serialPort->write(ADS122U04_SYNC_HEAD); */
-/*   _serialPort->write(ADS122U04_RDATA_CMD); */
-/*   delay(10); */
-
-/*   // Note: the next line will need to be changed if data integrity is enabled. */
-/*   //       The code will need to request 5 bytes for CRC or 6 bytes for inverted data. */
-
-/*   if (_serialPort->available() >= 3) */
-/*   { */
-/*     RXByte[0] = _serialPort->read(); // MSB */
-/*       delayMicroseconds(10); */
-/*     RXByte[1] = _serialPort->read(); */
-/*       delayMicroseconds(10); */
-/*     RXByte[2] = _serialPort->read(); // LSB */
-/*     if (_serialPort->available() > 0) // Note: this _should_ be redundant */
-/*     { */
-/*       if (_printDebug == true) */
-/*       { */
-/*         ROS_ERROR("ADS122U04_getConversionData: excess bytes available. Maybe data integrity is enabled?"); */
-/*       } */
-/*       while (_serialPort->available() > 0) */
-/*       { */
-/*         _serialPort->read(); // Read and ignore excess bytes (presumably inverted data or CRC) */
-/*       } */
-/*     } */
-/*   } */
-/*   else */
-/*   { */
-/*     if (_printDebug == true) */
-/*     { */
-/*         ROS_ERROR("ADS122U04_getConversionData: requestFrom failed"); */
-/*     } */
-/*     return; */
-/*   } */
+bool Ads122uDriver::getConversionData(uint32_t* conversionData) {
+  uint8_t RXByte[3] = {0};
 
 
-/*   // *conversionData = ((uint32_t)RXByte[2]) | ((uint32_t)RXByte[1]<<8) | ((uint32_t)RXByte[0]<<16); */
-/*   uint32_t conversionData =  (RXByte[0] + RXByte[1] * 256 + RXByte[2] * 65536); */
+  serial_port_.sendChar(ADS122U04_SYNC_HEAD);
+  serial_port_.sendChar(ADS122U04_RDATA_CMD);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
 
-/*   return; */
-/* } */
+  /* ROS_INFO_STREAM("[Ads122uDriver]: read " << bytes_read << " bytes"); */
+
+
+  uint8_t read_buffer[256];
+  int     bytes_read;
+
+  bytes_read = serial_port_.readSerial(read_buffer, serial_buffer_size_);
+
+  if (bytes_read != 3) {
+    ROS_WARN_STREAM("[Ads122uDriver]: Incorrect number of bytes read during conversion - skipping. Read: " << bytes_read << " bytes");
+    return (false);
+  }
+
+  *conversionData = (read_buffer[0] + read_buffer[1] * 256 + read_buffer[2] * 65536);
+  return (true);
+}
 
 //}
-
 
 }  // namespace ads122u_driver
 

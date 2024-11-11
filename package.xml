@@ -15,6 +15,7 @@
   <depend>cmake_modules</depend>
   <depend>roscpp</depend>
   <depend>nodelet</depend>
+  <depend>std_msgs</depend>
 
   <export>
     <nodelet plugin="${prefix}/nodelets.xml" />

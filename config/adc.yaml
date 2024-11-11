@@ -1,2 +1,2 @@
-portname: "/dev/ttyUSB0"
-baudrate: 9600
+portname: "/dev/adc"
+baudrate: 115200

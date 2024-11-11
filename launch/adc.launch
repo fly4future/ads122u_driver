@@ -25,11 +25,9 @@
         <!-- ROS parameters config file -->
       <rosparam file="$(find ads122u_driver)/config/adc.yaml" />
 
-        <!-- Subscribers (note that the topic names will also be remapped using the namespace as a prefix) -->
-      <remap from="~odom_in" to="estimation_manager/odom_main" />
-
         <!-- Publishers (note that the topic names will also be remapped using the namespace as a prefix) -->
-      <remap from="~reference_out" to="control_manager/reference" />
+      <remap from="~raw_out" to="~raw_measurement" />
+      <remap from="~voltage_out" to="~voltage" />
 
         <!-- Service servers (note that the service names will also be remapped using the namespace as a prefix) -->
       <remap from="~start" to="~start" />
