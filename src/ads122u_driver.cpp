@@ -300,6 +300,8 @@ private:
 
   std::string             portname_ = "test";
   int                     baudrate_ = 115200;
+  double                  reference_voltage_ = 5.0;
+
   serial_port::SerialPort serial_port_;
 
   bool              is_connected_   = false;
@@ -347,6 +349,7 @@ void Ads122uDriver::onInit() {
 
   nh.param("portname", portname_, std::string("/dev/ttyUSB0"));
   nh.param("baudrate", baudrate_, 115200);
+  nh.param("reference_voltage", reference_voltage_, 5.0);
 
   // | -------- initialize a publisher for UAV reference -------- |
   pub_raw_ = nh.advertise<std_msgs::UInt32>("raw_out", 1);
@@ -363,7 +366,7 @@ void Ads122uDriver::onInit() {
   reset();
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-  configureADCmode(ADS122U04_RAW_MODE, 20);
+  configureADCmode(ADS122U04_RAW_MODE, ADS122U04_DATA_RATE_20SPS);
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
   start();
@@ -380,15 +383,20 @@ void Ads122uDriver::onInit() {
 void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te) {
 
   uint32_t raw_data;
+  double voltage;
 
   if (!getConversionData(&raw_data)) {
     ROS_ERROR("[Ads122uDriver]: Could not read raw data");
     return;
   }
+  if(raw_data > 8388607){
+	voltage = 0.0;
+  }else{
+	//voltage = (double(raw_data) / (16777215.0)) * 10;
+	voltage = (double(raw_data) / (8388607.0)) * reference_voltage_;
+  }
 
-  int32_t raw_data_signed = int32_t(raw_data);
-  double  voltage         = (double(raw_data_signed) / (16777215.0)) * 10;
-  
+
   std_msgs::UInt32 raw_msg;
   std_msgs::Float64 voltage_msg;
 
@@ -398,7 +406,18 @@ void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te
   pub_raw_.publish(raw_msg);
   pub_voltage_.publish(voltage_msg);
 
-  ROS_INFO_STREAM("Volts: " << std::to_string(voltage) << " raw: " << std::to_string(raw_data) << " raw signed: " << std::to_string(raw_data_signed));
+  ROS_INFO_STREAM("Volts: " << std::to_string(voltage) << " raw: " << std::to_string(raw_data));
+  if(raw_data == 8388607){
+	ROS_WARN_STREAM("Overvoltage detected, resetting device");
+  	reset();
+  	std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+  	configureADCmode(ADS122U04_RAW_MODE, ADS122U04_DATA_RATE_20SPS);
+  	std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+  start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
 }
 
 //}
@@ -585,10 +604,15 @@ bool Ads122uDriver::send_command(int8_t command) {
 bool Ads122uDriver::getConversionData(uint32_t* conversionData) {
   uint8_t RXByte[3] = {0};
 
+  configureADCmode(ADS122U04_RAW_MODE, ADS122U04_DATA_RATE_20SPS);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+  start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
   serial_port_.sendChar(ADS122U04_SYNC_HEAD);
   serial_port_.sendChar(ADS122U04_RDATA_CMD);
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
 
   /* ROS_INFO_STREAM("[Ads122uDriver]: read " << bytes_read << " bytes"); */
