@@ -326,11 +326,6 @@ private:
   ros::Timer main_timer_;
   void       callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te);
 
-  // | ---------------------- ROS service servers --------------------- |
-
-  bool               callbackStart([[maybe_unused]] std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res);
-  ros::ServiceServer srv_server_start_;
-
   // | ---------------------- ROS publishers --------------------- |
   ros::Publisher pub_raw_;
   ros::Publisher pub_voltage_;
@@ -357,9 +352,6 @@ void Ads122uDriver::onInit() {
 
   // | -- initialize the main timer - main loop of the nodelet -- |
   main_timer_ = nh.createTimer(ros::Rate(20), &Ads122uDriver::callbackMainTimer, this);
-
-  // | ---------------- initialize service server --------------- |
-  srv_server_start_ = nh.advertiseService("start", &Ads122uDriver::callbackStart, this);
 
   connectToSensor();
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -418,18 +410,6 @@ void Ads122uDriver::callbackMainTimer([[maybe_unused]] const ros::TimerEvent& te
   start();
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
-}
-
-//}
-
-/* callbackStart() //{ */
-
-bool Ads122uDriver::callbackStart([[maybe_unused]] std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res) {
-  ROS_INFO("[Ads122uDriver]: callback start");
-  res.success = true;
-  res.message = "Starting waypoint following.";
-
-  return true;
 }
 
 //}

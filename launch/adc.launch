@@ -29,9 +29,6 @@
       <remap from="~raw_out" to="~raw_measurement" />
       <remap from="~voltage_out" to="~voltage" />
 
-        <!-- Service servers (note that the service names will also be remapped using the namespace as a prefix) -->
-      <remap from="~start" to="~start" />
-
     </node>
 
   </group>
